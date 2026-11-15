@@ -1,0 +1,88 @@
+name: docs
+
+# Builds the MkDocs Material site and deploys it to GitHub Pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Install MkDocs + plugins
+        run: pip install -r requirements-docs.txt
+
+      - name: Build MkDocs site
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Fails the run when Pages drifts (source, custom domain) or GitHub stops serving the new site, so it is
+  # noticed on the next deploy instead of by a visitor. It asks GitHub's Pages origin directly: the public
+  # hostname sits behind Cloudflare, whose bot protection answers GitHub's runners with 403.
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      pages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HOST: mt5.tryqkt.com
+    steps:
+      - name: Check the Pages settings
+        run: |
+          read -r build_type cname < <(gh api "repos/${{ github.repository }}/pages" --jq '"\(.build_type) \(.cname)"')
+          if [ "$build_type" != workflow ] || [ "$cname" != "$HOST" ]; then
+            echo "::error::Pages is set to source=$build_type domain=$cname; expected source GitHub Actions and domain $HOST (Settings > Pages)"
+            exit 1
+          fi
+
+      - name: Check GitHub serves the site
+        run: |
+          for _ in $(seq 1 8); do
+            code=$(curl -s -o page.html -w "%{http_code}" -H "Host: $HOST" http://185.199.108.153/ || true)
+            [ "$code" = 200 ] && grep -q "mt5-gateway" page.html && exit 0
+            sleep 15
+          done
+          echo "::error::GitHub Pages answered ${code:-nothing} for $HOST after the deploy"
+          exit 1

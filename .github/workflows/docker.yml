@@ -1,0 +1,129 @@
+name: docker
+
+# Build the gateway images and push them to GHCR (ghcr.io/munashesydney/mt5-gateway-api).
+# Fires when main advances and on manual dispatch.
+#
+# One build per release and variant publishes every tag. The VNC image (Dockerfile)
+# keeps the plain names existing deployments pull: `latest` (main only), the VERSION
+# file value, the `v`-prefixed form, and a `sha-<commit>` tag for precise pinning.
+# The API-only image (Dockerfile.headless) publishes `headless` and the same names
+# with a `-headless` suffix. Tag pushes deliberately do NOT trigger this workflow: a second build
+# of the same commit races the first and overwrites the shared tags with a
+# different digest.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    branches: [main]
+    # A docs-only push must not rebuild the image: the build installs the MT5 terminal fresh, so a rebuild
+    # republishes the release tags with whatever terminal build MetaQuotes serves that day.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      # A failed headless build must not stop the image existing deployments pull.
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            suffix: ''
+            floating_tag: latest
+            cache_scope: mt5-gateway
+          - dockerfile: Dockerfile.headless
+            suffix: -headless
+            floating_tag: headless
+            cache_scope: mt5-gateway-headless
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Free disk space for the Wine image build
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/munashesydney/mt5-gateway-api
+          tags: |
+            type=raw,value=${{ matrix.floating_tag }},enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.version }}${{ matrix.suffix }}
+            type=raw,value=v${{ steps.ver.outputs.version }}${{ matrix.suffix }}
+            type=sha,suffix=${{ matrix.suffix }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Daily OS patch revision
+        id: osrev
+        run: echo "rev=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Build for security scan
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Reuse the heavy Wine/template layers from the shared cache, but bust
+          # the terminal layer on every release so the published image bakes the
+          # freshest terminal (PR builds keep the default MT5_LAYER_REV).
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          build-args: |
+            MT5_LAYER_REV=${{ github.sha }}
+            OS_PATCH_REV=${{ steps.osrev.outputs.rev }}
+
+      - name: Scan release candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/munashesydney/mt5-gateway-api:${{ steps.ver.outputs.version }}${{ matrix.suffix }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          scanners: vuln
+          timeout: 30m0s
+          exit-code: 1
+
+      - name: Push scanned image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+          build-args: |
+            MT5_LAYER_REV=${{ github.sha }}
+            OS_PATCH_REV=${{ steps.osrev.outputs.rev }}

@@ -1,0 +1,43 @@
+#!/bin/bash
+set -euo pipefail
+
+source /scripts/02-common.sh
+
+log_message "RUNNING" "03-install-mono.sh"
+
+# Seed a fresh volume from the baked template prefix (Mono + Python + MT5 libs +
+# the MT5 terminal), so the installs below are a fast copy instead of a ~10min
+# re-install and a cold boot never runs an installer. Only when the volume lacks
+# them; volumes seeded before the template included MT5 still install it at
+# runtime in 04-install-mt5.sh.
+wine_template="${WINE_TEMPLATE:-/opt/wine-template}"
+if [ -d "$wine_template" ] && [ ! -e "/config/.wine/drive_c/windows/mono" ]; then
+    log_message "INFO" "Seeding wineprefix from baked template..."
+    mkdir -p /config/.wine
+    cp -a "$wine_template/." /config/.wine/
+    chown -R abc:abc /config/.wine 2>/dev/null || true
+    log_message "INFO" "Wineprefix seeded ($(du -sh /config/.wine 2>/dev/null | cut -f1))."
+fi
+
+# Install Mono if not present
+if [ ! -e "/config/.wine/drive_c/windows/mono" ]; then
+    log_message "INFO" "Downloading and installing Mono..."
+    if wget -O /tmp/mono.msi https://dl.winehq.org/wine/wine-mono/8.0.0/wine-mono-8.0.0-x86.msi > /dev/null 2>&1; then
+        verify_download /tmp/mono.msi "$mono_sha256" || {
+            log_message "ERROR" "Mono installer checksum mismatch."
+            exit 1
+        }
+        if WINEDLLOVERRIDES=mscoree=d wine msiexec /i /tmp/mono.msi /qn; then
+            log_message "INFO" "Mono installed successfully."
+        else
+            log_message "ERROR" "Failed to install Mono."
+            exit 1
+        fi
+        rm -f /tmp/mono.msi
+    else
+        log_message "ERROR" "Failed to download Mono installer."
+        exit 1
+    fi
+else
+    log_message "INFO" "Mono is already installed."
+fi
