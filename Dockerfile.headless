@@ -6,7 +6,7 @@
 # builds from 6274 on stop under Wine 10 with a false "debugger has been found" dialog (see
 # docs/operations/image-size.md), so this takes build 6244 from the project's earlier published image
 # (Docker Hub; kept as a digest-pinned build input).
-FROM elitekaycy/mt5-gateway-api:0.3.19@sha256:28042a654f344edab30c7ef664e0b2f19e59134fb21c300e000809c0d93a37d1 AS terminal-source
+FROM elitekaycy/mt5-gateway-api:v0.4.1@sha256:2b04e2125d3a860ae93be1974c781ffabc29692616f050badb811c16fb802a02 AS terminal-source
 
 FROM ghcr.io/linuxserver/baseimage-debian:bookworm@sha256:2b0f552bc851069943bca11a6953392baff608eafa2465e30820fc2456e39ab5
 
