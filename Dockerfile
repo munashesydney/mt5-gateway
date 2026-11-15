@@ -2,7 +2,7 @@
 # builds from 6274 on stop under Wine 10 with a false "debugger has been found" dialog (see
 # docs/operations/image-size.md), so this takes build 6244 from the project's earlier published image
 # (Docker Hub; kept as a digest-pinned build input).
-FROM elitekaycy/mt5-gateway-api:0.3.19@sha256:28042a654f344edab30c7ef664e0b2f19e59134fb21c300e000809c0d93a37d1 AS terminal-source
+FROM elitekaycy/mt5-gateway-api:v0.4.1@sha256:2b04e2125d3a860ae93be1974c781ffabc29692616f050badb811c16fb802a02 AS terminal-source
 
 # 1. Update the base image to the Bookworm tag
 FROM ghcr.io/linuxserver/baseimage-kasmvnc:debianbookworm@sha256:c6129530811450448ab760064b27e111fb3351fc3222af652f605a48eb518ed7 AS base
