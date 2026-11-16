@@ -56,5 +56,6 @@ Thumbs.db
 scripts/deploy-cutedge-endpoints.sh
 
 # mkdocs
+.venv/
 .venv-docs/
 site/

@@ -88,18 +88,58 @@ def get_symbol_filling_mode(symbol_name):
         return mt5.ORDER_FILLING_RETURN
 
 
+def get_all_positions():
+    """
+    All open positions as a tuple, working around a terminal cache quirk.
+
+    On some broker terminal builds the unfiltered positions_get()/
+    positions_total() pair reads a terminal-local positions cache that can be
+    empty even while the server holds open positions (account_info() still
+    reflects the margin). Passing the wildcard group filter forces the
+    server-side query path, which returns the real list. Falls back to the
+    unfiltered call when the group filter is not supported.
+    """
+    try:
+        positions = mt5.positions_get(group="*")
+    except TypeError:
+        positions = mt5.positions_get()
+    if positions is None:
+        logger.error(f"Failed to retrieve positions: {mt5.last_call_error()}")
+        return None
+
+    if len(positions) == 0:
+        total = mt5.positions_total()
+        if total:
+            logger.warning(
+                f"positions_get() returned no positions but positions_total() reports {total}"
+            )
+    return positions
+
+
+def get_position_by_ticket(ticket):
+    """
+    Look up a single open position by ticket through the server-side query,
+    filtering in Python so a stale terminal cache cannot hide the position.
+    """
+    positions = get_all_positions()
+    if not positions:
+        return None
+    for position in positions:
+        if position.ticket == ticket:
+            return position
+    return None
+
+
 def close_position(position, deviation=20, magic=0, comment=""):
     if "ticket" not in position:
         logger.error("Position dictionary missing 'ticket' key.")
         return None
 
     ticket = position["ticket"]
-    positions = mt5.positions_get(ticket=ticket)
-    if positions is None or len(positions) == 0:
+    actual_position = get_position_by_ticket(ticket)
+    if actual_position is None:
         logger.error(f"Position {ticket} not found")
         return None
-
-    actual_position = positions[0]
 
     order_type_dict = {
         0: mt5.ORDER_TYPE_SELL,  # Close BUY position with SELL
@@ -170,83 +210,75 @@ def close_position(position, deviation=20, magic=0, comment=""):
 def close_all_positions(order_type="all", magic=None):
     order_type_dict = {"BUY": mt5.ORDER_TYPE_BUY, "SELL": mt5.ORDER_TYPE_SELL}
 
-    total_positions = mt5.positions_total()
-    if total_positions is not None and total_positions > 0:
-        positions = mt5.positions_get()
-        if positions is None:
-            logger.error("Failed to retrieve positions.")
-            return {"closed": [], "failed": [{"error": "positions_unavailable"}]}
+    positions = get_all_positions()
+    if positions is None:
+        logger.error("Failed to retrieve positions.")
+        return {"closed": [], "failed": [{"error": "positions_unavailable"}]}
 
-        positions_data = [pos._asdict() for pos in positions]
-        positions_df = pd.DataFrame(positions_data)
-
-        if magic is not None:
-            positions_df = positions_df[positions_df["magic"] == magic]
-
-        if order_type != "all":
-            if order_type not in order_type_dict:
-                logger.error(
-                    f"Invalid order_type: {order_type}. Must be 'BUY', 'SELL', or 'all'."
-                )
-                return {"closed": [], "failed": [{"error": "invalid_order_type"}]}
-            positions_df = positions_df[
-                positions_df["type"] == order_type_dict[order_type]
-            ]
-
-        if positions_df.empty:
-            logger.error("No open positions matching the criteria.")
-            return {"closed": [], "failed": []}
-
-        closed = []
-        failed = []
-        for _, position in positions_df.iterrows():
-            order_result = close_position(position)
-            if order_result is None:
-                failed.append(
-                    {
-                        "ticket": int(position["ticket"]),
-                        "retcode": None,
-                        "retcode_name": "UNKNOWN_OUTCOME",
-                        "comment": "No result returned by MT5",
-                    }
-                )
-            else:
-                info = classify_retcode(order_result.retcode)
-                result_data = order_result._asdict()
-                result_data["partial"] = info.name == "DONE_PARTIAL"
-                if info.is_success:
-                    result_data["fill_price_source"] = confirm_close(
-                        result_data, int(position["ticket"]), None
-                    )
-                    closed.append(result_data)
-                else:
-                    failed.append(
-                        {
-                            "ticket": int(position["ticket"]),
-                            "retcode": order_result.retcode,
-                            "retcode_name": info.name,
-                            "comment": order_result.comment,
-                        }
-                    )
-
-        return {"closed": closed, "failed": failed}
-    else:
+    if len(positions) == 0:
         logger.error("No open positions to close.")
         return {"closed": [], "failed": []}
 
+    positions_data = [pos._asdict() for pos in positions]
+    positions_df = pd.DataFrame(positions_data)
+
+    if magic is not None:
+        positions_df = positions_df[positions_df["magic"] == magic]
+
+    if order_type != "all":
+        if order_type not in order_type_dict:
+            logger.error(
+                f"Invalid order_type: {order_type}. Must be 'BUY', 'SELL', or 'all'."
+            )
+            return {"closed": [], "failed": [{"error": "invalid_order_type"}]}
+        positions_df = positions_df[positions_df["type"] == order_type_dict[order_type]]
+
+    if positions_df.empty:
+        logger.error("No open positions matching the criteria.")
+        return {"closed": [], "failed": []}
+
+    closed = []
+    failed = []
+    for _, position in positions_df.iterrows():
+        order_result = close_position(position)
+        if order_result is None:
+            failed.append(
+                {
+                    "ticket": int(position["ticket"]),
+                    "retcode": None,
+                    "retcode_name": "UNKNOWN_OUTCOME",
+                    "comment": "No result returned by MT5",
+                }
+            )
+        else:
+            info = classify_retcode(order_result.retcode)
+            result_data = order_result._asdict()
+            result_data["partial"] = info.name == "DONE_PARTIAL"
+            if info.is_success:
+                result_data["fill_price_source"] = confirm_close(
+                    result_data, int(position["ticket"]), None
+                )
+                closed.append(result_data)
+            else:
+                failed.append(
+                    {
+                        "ticket": int(position["ticket"]),
+                        "retcode": order_result.retcode,
+                        "retcode_name": info.name,
+                        "comment": order_result.comment,
+                    }
+                )
+
+    return {"closed": closed, "failed": failed}
+
 
 def get_positions(magic=None):
-    total_positions = mt5.positions_total()
-    if total_positions is None:
-        logger.error("Failed to get positions total.")
-        return pd.DataFrame()
+    positions = get_all_positions()
+    if positions is None:
+        logger.error("Failed to retrieve positions.")
+        return None
 
-    if total_positions > 0:
-        positions = mt5.positions_get()
-        if positions is None:
-            logger.error("Failed to retrieve positions.")
-            return pd.DataFrame()
-
+    if len(positions) > 0:
         positions_data = [pos._asdict() for pos in positions]
         positions_df = pd.DataFrame(positions_data)
 

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from lib import get_all_positions
 from mt5_connection import mt5
 
 
@@ -9,8 +10,11 @@ def reconcile(magic=None, lookback_hours=24):
     """Return current positions/orders and recent deals, optionally by magic."""
     start = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     end = datetime.now(timezone.utc)
-    positions = mt5.positions_get()
-    orders = mt5.orders_get()
+    positions = get_all_positions()
+    try:
+        orders = mt5.orders_get(group="*")
+    except TypeError:
+        orders = mt5.orders_get()
     deals = mt5.history_deals_get(start, end)
     if positions is None or orders is None or deals is None:
         raise RuntimeError(f"MT5 reconciliation failed: {mt5.last_call_error()}")

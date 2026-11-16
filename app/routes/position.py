@@ -15,6 +15,8 @@ from errors import (
 from lib import (
     close_all_positions,
     close_position,
+    get_all_positions,
+    get_position_by_ticket,
     get_positions,
     get_symbol_filling_mode,
     validate_sl_tp,
@@ -151,11 +153,9 @@ def close_position_partial_endpoint():
         if not math.isfinite(volume) or volume <= 0:
             return validation_error_response("Volume must be positive")
 
-        positions = mt5.positions_get(ticket=ticket)
-        if positions is None or len(positions) == 0:
+        position = get_position_by_ticket(ticket)
+        if position is None:
             return validation_error_response(f"Position {ticket} not found")
-
-        position = positions[0]
         symbol = position.symbol
         position_type = position.type
 
@@ -335,17 +335,16 @@ def modify_sl_tp_endpoint():
             position = int(data["position"])
         except (TypeError, ValueError):
             return validation_error_response("Position must be an integer")
-        positions = mt5.positions_get(ticket=position)
-        if not positions:
+        current = get_position_by_ticket(position)
+        if current is None:
             logger.error(f"Position {position} not found for SL/TP modify")
             return validation_error_response(f"Position {position} not found")
 
         try:
-            request_data = build_sltp_request(data, positions[0], mt5.TRADE_ACTION_SLTP)
+            request_data = build_sltp_request(data, current, mt5.TRADE_ACTION_SLTP)
         except OrderRequestError as error:
             return validation_error_response(str(error))
 
-        current = positions[0]
         sl = request_data["sl"] if request_data["sl"] > 0 else None
         tp = request_data["tp"] if request_data["tp"] > 0 else None
         is_valid, error_msg = validate_sl_tp(
@@ -445,11 +444,11 @@ def positions_total_endpoint():
     description: Retrieve the total number of open trading positions.
     """
     try:
-        total = mt5.positions_total()
-        if total is None:
+        positions = get_all_positions()
+        if positions is None:
             return validation_error_response("Failed to get positions total")
 
-        return jsonify({"total": total})
+        return jsonify({"total": len(positions)})
 
     except Exception as e:
         return internal_error_response("positions_total", e)
