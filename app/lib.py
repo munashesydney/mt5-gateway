@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from collections import OrderedDict
 
 import pandas as pd
@@ -88,31 +89,103 @@ def get_symbol_filling_mode(symbol_name):
         return mt5.ORDER_FILLING_RETURN
 
 
-def get_all_positions():
-    """
-    All open positions as a tuple, working around a terminal cache quirk.
+# Re-attach cooldown: a genuinely idle account must not pay a
+# shutdown/initialize cycle on every listing while its margin stays non-zero
+# for some reason the margin guard cannot explain (e.g. broker quirks).
+_REATTACH_COOLDOWN_SECONDS = 60
+_last_reattach = 0.0
 
-    On some broker terminal builds the unfiltered positions_get()/
-    positions_total() pair reads a terminal-local positions cache that can be
-    empty even while the server holds open positions (account_info() still
-    reflects the margin). Passing the wildcard group filter forces the
-    server-side query path, which returns the real list. Falls back to the
+
+def _query_positions():
+    """
+    Open positions via the wildcard group filter, which forces the
+    server-side query path: on some broker terminal builds the unfiltered
+    call answers from a local cache that can lag reality. Falls back to the
     unfiltered call when the group filter is not supported.
     """
     try:
-        positions = mt5.positions_get(group="*")
+        return mt5.positions_get(group="*")
     except TypeError:
-        positions = mt5.positions_get()
+        return mt5.positions_get()
+
+
+def _snapshot_is_stale():
+    """
+    True when the open-position list looks empty but the server-side account
+    still carries margin that no pending order explains.
+
+    An API connection attached while the terminal was mid-login receives an
+    empty positions snapshot that never refreshes afterwards, yet
+    account_info() keeps answering from the server: an unexplained margin is
+    exactly that signature.
+    """
+    if mt5.positions_total():
+        return True
+
+    account = mt5.account_info()
+    if account is None or account.margin <= 0:
+        return False
+
+    # Pending orders also tie up margin; only an unexplained margin is stale.
+    try:
+        orders = mt5.orders_get(group="*")
+    except TypeError:
+        orders = mt5.orders_get()
+    return not orders
+
+
+def _reattach_positions_session():
+    """
+    Re-establish the MT5 IPC connection so the fresh attach receives the
+    current positions snapshot from the server. Done as one atomic step so
+    no other request thread can call into a half-closed session.
+    """
+    global _last_reattach
+    now = time.monotonic()
+    if now - _last_reattach < _REATTACH_COOLDOWN_SECONDS:
+        logger.warning("Positions snapshot stale but re-attach cooldown is active")
+        return False
+    _last_reattach = now
+
+    def reattach(module):
+        module.shutdown()
+        attached = module.initialize()
+        return attached, module.last_error()
+
+    attached, error = mt5.call_atomic(reattach)
+    if not attached:
+        logger.error(f"MT5 re-attach failed: {error}")
+        return False
+    logger.info("Re-attached MT5 session to refresh the positions snapshot")
+    return True
+
+
+def get_all_positions():
+    """
+    All open positions as a tuple, self-healing against stale connections.
+
+    Queries through the server-side path and, when the answer is empty but
+    the account still carries margin, re-attaches the MT5 session once and
+    retries (see _snapshot_is_stale).
+    """
+    positions = _query_positions()
     if positions is None:
         logger.error(f"Failed to retrieve positions: {mt5.last_call_error()}")
         return None
 
-    if len(positions) == 0:
-        total = mt5.positions_total()
-        if total:
-            logger.warning(
-                f"positions_get() returned no positions but positions_total() reports {total}"
-            )
+    if len(positions) == 0 and _snapshot_is_stale():
+        logger.warning(
+            "Positions list is empty while the account still carries margin; "
+            "re-attaching to refresh the connection snapshot"
+        )
+        if _reattach_positions_session():
+            positions = _query_positions()
+            if positions is None:
+                logger.error(
+                    f"Failed to retrieve positions after re-attach: "
+                    f"{mt5.last_call_error()}"
+                )
+                return None
     return positions
 
 
