@@ -318,6 +318,17 @@ def server_epoch_to_utc(epoch: Union[int, float]) -> datetime:
     return datetime.fromtimestamp(adjusted, tz=timezone.utc)
 
 
+def server_epoch_to_utc_iso(epoch: Union[int, float, None]) -> Optional[str]:
+    """ISO-8601 UTC instant for an MT5 broker-server epoch, or None when unset.
+
+    Read/display convenience over ``server_epoch_to_utc`` so list endpoints can
+    publish a true UTC instant next to the raw server epoch.
+    """
+    if not epoch:
+        return None
+    return server_epoch_to_utc(epoch).isoformat().replace("+00:00", "Z")
+
+
 def utc_epoch_to_server(
     epoch: Union[int, float],
     utc_now: Optional[Union[int, float]] = None,

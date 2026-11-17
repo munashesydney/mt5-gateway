@@ -3,6 +3,7 @@ from collections import namedtuple
 import lib
 
 Position = namedtuple("Position", "ticket type magic")
+TimedPosition = namedtuple("TimedPosition", "ticket type magic time")
 Account = namedtuple("Account", "margin")
 
 
@@ -64,6 +65,23 @@ def test_get_positions_uses_the_wildcard_group_query(monkeypatch):
         9521884
     ]
     assert calls[0] == {"group": "*"}
+
+
+def test_get_positions_publishes_utc_open_time(monkeypatch):
+    # MT5 reports position time in broker-server time; list rows must carry
+    # the true UTC instant so consumers can stamp it Z without drifting.
+    monkeypatch.setenv("MT5_SERVER_UTC_OFFSET_SECONDS", "7200")
+    monkeypatch.delenv("MT5_SERVER_TIME_ZONE", raising=False)
+    values = (TimedPosition(1, 0, 7, 1_794_873_915),)
+    monkeypatch.setattr(
+        lib.mt5, "positions_get", lambda **kw: values, raising=False
+    )
+    monkeypatch.setattr(lib.mt5, "positions_total", lambda: 1, raising=False)
+
+    rows = lib.get_positions().to_dict(orient="records")
+
+    assert rows[0]["time"] == 1_794_873_915
+    assert rows[0]["time_utc"] == "2026-11-16T22:05:15Z"
 
 
 def test_get_position_by_ticket_filters_in_python(monkeypatch):

@@ -9,7 +9,7 @@ from close_confirm import confirm_close
 from constants import ORDER_TYPE_TO_STRING, MT5Timeframe
 from mt5_connection import mt5
 from retcodes import classify_retcode
-from time_utils import server_epoch_to_utc
+from time_utils import server_epoch_to_utc, server_epoch_to_utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +354,10 @@ def get_positions(magic=None):
     if len(positions) > 0:
         positions_data = [pos._asdict() for pos in positions]
         positions_df = pd.DataFrame(positions_data)
+        # MT5 reports position times in broker-server time; publish the true
+        # UTC instant alongside the raw epoch so consumers can stamp it Z.
+        if "time" in positions_df.columns:
+            positions_df["time_utc"] = positions_df["time"].map(server_epoch_to_utc_iso)
 
         if magic is not None:
             positions_df = positions_df[positions_df["magic"] == magic]
@@ -365,6 +369,7 @@ def get_positions(magic=None):
                 "ticket",
                 "time",
                 "time_msc",
+                "time_utc",
                 "time_update",
                 "time_update_msc",
                 "type",

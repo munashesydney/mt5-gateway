@@ -41,7 +41,7 @@ from order_requests import build_trade_request
 from order_time import apply_expiration
 from pretrade import PreTradeError, validate_order_intent, validate_price_band
 from retcodes import classify_retcode, success_state
-from time_utils import ServerOffsetUnavailable, tick_time_ms
+from time_utils import ServerOffsetUnavailable, server_epoch_to_utc_iso, tick_time_ms
 
 order_bp = Blueprint("order", __name__)
 logger = logging.getLogger(__name__)
@@ -973,6 +973,11 @@ def get_pending_orders():
             order_dict = order._asdict()
             order_dict["type_str"] = ORDER_TYPE_TO_STRING.get(
                 order.type, f"UNKNOWN_{order.type}"
+            )
+            # MT5 reports order times in broker-server time; publish the true
+            # UTC instant alongside the raw epoch so consumers can stamp it Z.
+            order_dict["time_setup_utc"] = server_epoch_to_utc_iso(
+                order_dict.get("time_setup")
             )
             orders_list.append(order_dict)
 

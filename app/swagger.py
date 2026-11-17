@@ -326,8 +326,13 @@ swagger_config = {
                 },
                 "time_setup": {
                     "type": "integer",
-                    "description": "Order setup timestamp (Unix)",
+                    "description": "Order setup timestamp as broker-server epoch seconds (not UTC)",
                     "example": 1640000000,
+                },
+                "time_setup_utc": {
+                    "type": "string",
+                    "description": "Order setup time as a true UTC ISO-8601 instant (null when the broker offset cannot be resolved; falls back to the raw server epoch)",
+                    "example": "2023-11-14T20:13:20Z",
                 },
                 "type": {
                     "type": "integer",

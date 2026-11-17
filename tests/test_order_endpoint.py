@@ -191,3 +191,39 @@ def test_stop_limit_order_accepts_and_forwards_stoplimit(client, monkeypatch):
     assert calls[0]["type"] == order_route.mt5.ORDER_TYPE_BUY_STOP_LIMIT
     assert calls[0]["price"] == 1.154
     assert calls[0]["stoplimit"] == 1.1538
+
+
+PendingRow = namedtuple("PendingRow", "ticket time_setup type")
+
+
+def _stub_pending(client, monkeypatch, row):
+    monkeypatch.delenv("MT5_SERVER_TIME_ZONE", raising=False)
+    monkeypatch.setattr(
+        order_route.mt5, "orders_get", lambda **_: (row,), raising=False
+    )
+
+
+def test_pending_orders_publish_utc_setup_time(client, monkeypatch):
+    # MT5 reports time_setup in broker-server time; a UTC+2 broker's epoch must
+    # be published shifted back so consumers can stamp it Z without drifting.
+    monkeypatch.setenv("MT5_SERVER_UTC_OFFSET_SECONDS", "7200")
+    _stub_pending(client, monkeypatch, PendingRow(9522094, 1_794_873_915, 2))
+
+    body = client.get("/orders").get_json()
+
+    assert body["orders"][0]["time_setup"] == 1_794_873_915
+    assert body["orders"][0]["time_setup_utc"] == "2026-11-16T22:05:15Z"
+
+
+def test_pending_orders_setup_utc_degrades_without_offset(client, monkeypatch):
+    # No offset resolvable: the read path degrades to the raw server epoch
+    # rather than failing, matching server_epoch_to_utc's display semantics.
+    import time_utils
+
+    monkeypatch.delenv("MT5_SERVER_UTC_OFFSET_SECONDS", raising=False)
+    time_utils.set_derived_offset(None)
+    _stub_pending(client, monkeypatch, PendingRow(9522094, 1_794_873_915, 2))
+
+    body = client.get("/orders").get_json()
+
+    assert body["orders"][0]["time_setup_utc"] == "2026-11-17T00:05:15Z"
