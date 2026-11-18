@@ -73,9 +73,7 @@ def test_get_positions_publishes_utc_open_time(monkeypatch):
     monkeypatch.setenv("MT5_SERVER_UTC_OFFSET_SECONDS", "7200")
     monkeypatch.delenv("MT5_SERVER_TIME_ZONE", raising=False)
     values = (TimedPosition(1, 0, 7, 1_794_873_915),)
-    monkeypatch.setattr(
-        lib.mt5, "positions_get", lambda **kw: values, raising=False
-    )
+    monkeypatch.setattr(lib.mt5, "positions_get", lambda **kw: values, raising=False)
     monkeypatch.setattr(lib.mt5, "positions_total", lambda: 1, raising=False)
 
     rows = lib.get_positions().to_dict(orient="records")

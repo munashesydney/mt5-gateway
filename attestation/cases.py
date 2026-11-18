@@ -16,6 +16,7 @@ BOOT_CASES = (
 
 SECURITY_CASES = (
     "security_api_key",
+    "security_pooled_execution",
     "security_kill_switch",
     "security_no_secret_left_behind",
 )
@@ -83,6 +84,7 @@ ROUTE_COVERAGE = {
     "POST /modify_sl_tp": "api_sl_tp_set_and_modified",
     "PUT /orders/<int:ticket>": "api_pending_lifecycle",
     "DELETE /orders/<int:ticket>": "api_pending_lifecycle",
+    "POST /internal/execute": "security_pooled_execution",
     "POST /kill": "security_kill_switch",
     "POST /kill/release": "security_kill_switch",
 }

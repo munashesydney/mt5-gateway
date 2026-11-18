@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from contextvars import ContextVar
 from enum import Enum
 from functools import wraps
 from pathlib import Path
@@ -25,6 +26,7 @@ from time_utils import (
 )
 
 logger = logging.getLogger(__name__)
+pool_execution = ContextVar("pool_execution", default=None)
 
 # MetaTrader5 last_error codes <= -10000 are internal IPC failures
 # (RES_E_INTERNAL_FAIL, _SEND, _RECEIVE, _INIT, _CONNECT, _TIMEOUT): the
@@ -84,6 +86,28 @@ class SerializedMT5:
         @wraps(function)
         def serialized(*args: Any, **kwargs: Any) -> Any:
             with self._lock:
+                context = pool_execution.get()
+                if context is not None and name not in {
+                    "initialize",
+                    "login",
+                    "shutdown",
+                    "last_error",
+                    "account_info",
+                }:
+                    login, server, deadline = context
+                    account = self._module.account_info()
+                    if (
+                        account is None
+                        or account.login != login
+                        or account.server != server
+                    ):
+                        raise RuntimeError(
+                            "Broker account identity changed during execution"
+                        )
+                    if name == "order_send" and time.time() >= deadline:
+                        raise RuntimeError(
+                            "Execution deadline expired before broker submission"
+                        )
                 # MetaTrader5's request functions (order_check, order_send)
                 # reject any call made with a kwargs splat -- even an empty
                 # one -- returning None with (-2, 'Unnamed arguments not
@@ -140,6 +164,7 @@ class MT5Connection:
         self._status = ConnectionStatus.DISCONNECTED
         self._last_error: Optional[str] = None
         self._auth_failed = False
+        self._pool_credentials = None
         self._max_reconnect_attempts = int(os.getenv("MT5_RECONNECT_ATTEMPTS", "3"))
         self._base_delay = float(os.getenv("MT5_RECONNECT_BASE_DELAY", "1.0"))
         self._verify_ttl_seconds = float(
@@ -239,7 +264,8 @@ class MT5Connection:
                         self._set_status(ConnectionStatus.CONNECTED)
                         self._mark_session(account_info.login)
                         self._refresh_server_offset()
-                        self.start_offset_refresher()
+                        if os.getenv("MT5_POOL_MODE") != "1":
+                            self.start_offset_refresher()
                         return True
 
                 error_code, error_str = mt5.last_error()
@@ -498,7 +524,14 @@ class MT5Connection:
             from reconciliation import reconcile
 
             metrics.inc("mt5_reconnects_total")
-            if not self.initialize(self._reconnect_credentials()):
+            credentials = (
+                self._pool_credentials
+                if os.getenv("MT5_POOL_MODE") == "1"
+                else self._reconnect_credentials()
+            )
+            if os.getenv("MT5_POOL_MODE") == "1" and not credentials:
+                return False
+            if not self.initialize(credentials):
                 metrics.set("mt5_connected", 0)
                 self._note_reconnect_outcome(False)
                 return False

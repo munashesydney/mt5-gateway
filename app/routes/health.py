@@ -1,3 +1,4 @@
+import os
 import time
 
 from flasgger import swag_from
@@ -100,6 +101,21 @@ def ready_check():
       carries `auth_failed: true` — a permanent failure until credentials
       change, which callers must not treat as transient.
     """
+    if os.getenv("MT5_POOL_MODE") == "1":
+        from pathlib import Path
+
+        from autologin import LOGIN_SERVER_FILE, wine_path
+
+        # A fresh terminal must finish its first broker login before it can
+        # serve fast credential switches through IPC. Boot writes this marker.
+        authorized = Path(
+            wine_path(
+                os.getenv("MT5_LOGIN_SERVER_FILE", LOGIN_SERVER_FILE), os.name == "nt"
+            )
+        ).exists()
+        return jsonify(
+            status="ready" if authorized else "warming", pool_worker=authorized
+        ), 200 if authorized else 503
     conn = MT5Connection.get_instance()
 
     terminal = mt5.terminal_info() if conn.is_connected() else None

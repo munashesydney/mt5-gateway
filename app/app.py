@@ -25,6 +25,7 @@ from routes.error import error_bp
 from routes.health import health_bp
 from routes.history import history_bp
 from routes.order import order_bp
+from routes.pool import install_pool_guard, pool_bp
 from routes.position import position_bp
 from routes.symbol import symbol_bp
 from security import install_security_hooks
@@ -50,6 +51,7 @@ def create_app(start_mt5=True):
         )
     RequestIDMiddleware(application)
     install_security_hooks(application)
+    install_pool_guard(application)
     install_response_envelope(application)
     Swagger(application, config=swagger_config)
 
@@ -64,11 +66,12 @@ def create_app(start_mt5=True):
         error_bp,
         control_bp,
         metrics_bp,
+        pool_bp,
     ):
         application.register_blueprint(blueprint)
     application.wsgi_app = ProxyFix(application.wsgi_app, x_proto=1, x_host=1)
 
-    if start_mt5:
+    if start_mt5 and os.getenv("MT5_POOL_MODE") != "1":
         _start_mt5()
         _register_shutdown_handlers()
     return application

@@ -80,6 +80,17 @@ mt5cfg="$(dirname "$mt5exe")/Config"
 sdat="$mt5cfg/servers.dat"
 ini_lin="/config/.wine/drive_c/start.ini"
 
+# Pooled workers start without account credentials but still need the broker
+# directory and algo-trading settings before their first private login.
+if [ "${MT5_POOL_MODE:-0}" = "1" ]; then
+    mkdir -p "$mt5cfg"
+    if [ -s /defaults/servers.dat ]; then
+        cp /defaults/servers.dat "$sdat"
+        chown abc:abc "$sdat" 2>/dev/null || true
+    fi
+    python3 -c "import sys, os; from pathlib import Path; sys.path.insert(0, '/app'); from autologin import load_settings, persist_algo_trading; persist_algo_trading(Path(sys.argv[1]), load_settings(os.environ).enable_algo_trading)" "$mt5cfg/common.ini"
+fi
+
 if [ -n "${MT5_LOGIN:-}" ]; then
     # Headless env login. Seed the baked broker directory into the volume as a
     # fallback for name-based login (major brokers, or when MT5_AUTORESOLVE=0 or

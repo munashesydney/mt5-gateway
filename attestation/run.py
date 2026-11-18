@@ -900,6 +900,31 @@ def security_api_key(run: Run, detail: dict[str, Any]) -> None:
         detail["rejected"] = 2
 
 
+def security_pooled_execution(run: Run, detail: dict[str, Any]) -> None:
+    with run.gateway(env={"API_KEY": uuid.uuid4().hex, "MT5_POOL_MODE": "1"}) as gw:
+        gw.wait_ready()
+        expect(gw.get("/account")[0] == 403, "raw worker account access was allowed")
+        operation = {
+            "login": run.login,
+            "password": run.password,
+            "server": run.server,
+            "method": "GET",
+            "path": "/account",
+            "deadline": time.time() + 20,
+        }
+        status, account = gw.post("/internal/execute", operation)
+        expect(
+            status == 200 and str(account.get("login")) == run.login,
+            "pooled login did not verify the requested account",
+        )
+        operation["deadline"] = time.time() - 1
+        expect(
+            gw.post("/internal/execute", operation)[0] == 503,
+            "expired operation was accepted",
+        )
+        detail["verified_login"] = run.login
+
+
 def security_kill_switch(run: Run, detail: dict[str, Any]) -> None:
     with run.gateway() as gw:
         gw.wait_ready()

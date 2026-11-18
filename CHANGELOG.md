@@ -4,6 +4,26 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-17
+
+### Added
+
+- Opt-in pooled worker mode (`MT5_POOL_MODE=1`) with authenticated private
+  `/internal/execute` requests for serial account switching and execution.
+- Broker identity checks during pooled execution and a deadline check immediately
+  before each broker submission.
+- Pool readiness waits for initial broker authorization. Warm-up seeds the broker
+  directory and algo-trading settings without placing trades.
+- Pool safety tests and an attestation case for private execution.
+
+### Changed
+
+- Pooled workers deny direct account/trading routes; Plane dispatches requests
+  through the private execution endpoint. Dedicated gateway behavior is unchanged.
+- Session credentials, symbol-selection state and broker-time offsets are reset
+  between pooled operations. Reconnects use the current operation's credentials.
+
+
 ## [0.5.0] - 2026-11-15
 
 ### Added

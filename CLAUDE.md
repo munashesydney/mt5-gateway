@@ -12,7 +12,8 @@
 ## Runtime
 
 MetaTrader5 is a process-global, single-IPC client. Every `mt5.*` call goes
-through `app/mt5_connection.py`; run one process/account per container. Read
+through `app/mt5_connection.py`; run one process and one active account at a time
+per container. Pooled mode switches accounts serially through private execution. Read
 `last_error()` immediately at the serialized boundary. Reconcile after reconnect.
 Broker-time conversion lives only in `app/time_utils.py`. See the
 [official Python integration documentation](https://www.mql5.com/en/docs/python_metatrader5).

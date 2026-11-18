@@ -21,6 +21,13 @@ _symbol_select_cache: "OrderedDict[str, None]" = OrderedDict()
 _symbol_select_cache_lock = threading.Lock()
 
 
+def reset_symbol_cache():
+    global _last_reattach
+    _last_reattach = 0.0
+    with _symbol_select_cache_lock:
+        _symbol_select_cache.clear()
+
+
 def get_timeframe(timeframe_str: str) -> MT5Timeframe:
     try:
         return MT5Timeframe[timeframe_str.upper()].value
