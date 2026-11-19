@@ -55,7 +55,7 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   # Verify this fork's Pages URL, matching mkdocs.yml. The upstream custom domain
   # is not configured here; use the repository site rather than its old hostname.
