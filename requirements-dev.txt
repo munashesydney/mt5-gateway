@@ -5,7 +5,7 @@ flask-cors==6.0.1
 hypothesis==6.156.1
 pandas==2.3.3
 python-dotenv==1.1.1
-python-json-logger==3.3.0
+python-json-logger==4.2.0
 coverage==7.13.5
 mypy==1.19.1
 pytest-cov==6.2.1
