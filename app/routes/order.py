@@ -29,6 +29,7 @@ from lib import (
     validate_type_filling,
     validate_volume,
 )
+from market_quote import wait_for_market_quote
 from metrics import metrics
 from money import (
     NumericValidationError,
@@ -36,7 +37,7 @@ from money import (
     normalize_price,
     normalize_volume,
 )
-from mt5_connection import mt5
+from mt5_connection import mt5, pool_execution
 from order_requests import build_trade_request
 from order_time import apply_expiration
 from pretrade import PreTradeError, validate_order_intent, validate_price_band
@@ -128,7 +129,7 @@ def _resolve_async_fill(result_dict, result, request_id):
                 "schema": {"$ref": "#/definitions/ErrorResponse"},
             },
             503: {
-                "description": "MT5 connection unavailable",
+                "description": "MT5 connection or broker quote unavailable. submitted=false confirms no order was sent.",
                 "schema": {"$ref": "#/definitions/ErrorResponse"},
             },
         },
@@ -239,12 +240,19 @@ def send_market_order_endpoint():
         if order_type in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]:
             action = TRADE_ACTION_DEAL
 
-            tick = mt5.symbol_info_tick(data["symbol"])
+            context = pool_execution.get()
+            quote_budget = (
+                min(2.0, max(0.0, context[2] - time.time())) if context else 2.0
+            )
+            tick = wait_for_market_quote(
+                lambda: mt5.symbol_info_tick(data["symbol"]), quote_budget
+            )
             if tick is None:
-                logger.error(f"[{request_id}] Failed to get tick for {data['symbol']}")
-                return validation_error_response(
-                    f"Failed to get symbol price for {data['symbol']}"
-                )
+                return jsonify(
+                    error=f"No live market quote is available for {data['symbol']}; retry shortly",
+                    error_type="connection_error",
+                    submitted=False,
+                ), 503
 
             try:
                 price = normalize_price(

@@ -464,6 +464,10 @@ swagger_config = {
         "ErrorResponse": {
             "type": "object",
             "properties": {
+                "submitted": {
+                    "type": "boolean",
+                    "description": "False explicitly confirms a pre-submission failure. Absent does not imply a safe retry.",
+                },
                 "error": {"type": "string", "description": "Error message"},
                 "error_type": {
                     "type": "string",

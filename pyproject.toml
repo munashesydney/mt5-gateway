@@ -24,6 +24,7 @@ known-first-party = [
   "lib",
   "logging_config",
   "metrics",
+  "market_quote",
   "middleware",
   "money",
   "mt5_connection",

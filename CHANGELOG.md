@@ -4,6 +4,15 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-18
+
+### Fixed
+
+- Wait briefly for a usable broker quote after login instead of rejecting market
+  orders with a zero price. Missing quotes return a temporary 503 before submission.
+- Explicitly identify pooled login/deadline failures that occur before broker
+  submission, so Plane can permit identical keyed retries without replaying them forever.
+
 ## [0.6.0] - 2026-11-17
 
 ### Added

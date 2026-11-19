@@ -63,14 +63,18 @@ def execute():
     remaining = min(20.0, deadline - time.time())
     if remaining <= 0 or not execution_lock.acquire(timeout=remaining):
         return jsonify(
-            error="Execution deadline expired", error_type="capacity_error"
+            error="Execution deadline expired",
+            error_type="capacity_error",
+            submitted=False,
         ), 503
     conn = MT5Connection.get_instance()
     context_token = pool_execution.set((login, server, deadline))
     try:
         if time.time() >= deadline:
             return jsonify(
-                error="Execution deadline expired", error_type="capacity_error"
+                error="Execution deadline expired",
+                error_type="capacity_error",
+                submitted=False,
             ), 503
         credentials = {"login": login, "password": password, "server": server}
         conn._pool_credentials = credentials
@@ -81,12 +85,16 @@ def execute():
             **credentials, timeout=timeout
         ):
             return jsonify(
-                error="Broker login failed", error_type="connection_error"
+                error="Broker login failed",
+                error_type="connection_error",
+                submitted=False,
             ), 503
         account = mt5.account_info()
         if account is None or account.login != login or account.server != server:
             return jsonify(
-                error="Broker account identity mismatch", error_type="connection_error"
+                error="Broker account identity mismatch",
+                error_type="connection_error",
+                submitted=False,
             ), 503
         from lib import reset_symbol_cache
         from time_utils import set_derived_offset
@@ -98,7 +106,9 @@ def execute():
         # Login and offset discovery may have consumed the entire deadline.
         if time.time() >= deadline:
             return jsonify(
-                error="Execution deadline expired", error_type="capacity_error"
+                error="Execution deadline expired",
+                error_type="capacity_error",
+                submitted=False,
             ), 503
         # Reuse existing validation, kill switch, response formats and handlers.
         headers = {"Authorization": request.headers.get("Authorization", "")}

@@ -78,6 +78,74 @@ def test_duplicate_http_request_places_only_one_order(client, monkeypatch):
     assert calls[0]["magic"] != 0
 
 
+def test_market_order_waits_for_quote_without_signal_price_and_keeps_levels(
+    client, monkeypatch
+):
+    ticks = [SimpleNamespace(bid=0, ask=0), SimpleNamespace(bid=3701, ask=3702)]
+    monkeypatch.setattr(
+        order_route.mt5,
+        "symbol_info_tick",
+        lambda _: ticks.pop(0) if len(ticks) > 1 else ticks[0],
+    )
+    sent = []
+    monkeypatch.setattr(
+        order_route.mt5,
+        "order_send",
+        lambda payload: (
+            sent.append(payload)
+            or OrderResult(10009, "done", 0.1, 3702, 10, 11, 3700, 3737)
+        ),
+        raising=False,
+    )
+    result = client.post(
+        "/order",
+        json={"symbol": "XAUUSD", "volume": 0.1, "type": "BUY", "sl": 3700, "tp": 3737},
+    )
+    assert result.status_code == 200
+    assert len(sent) == 1
+    assert sent[0]["price"] == 3702
+    assert sent[0]["sl"] == 3700 and sent[0]["tp"] == 3737
+
+
+def test_missing_quote_is_temporary_and_does_not_submit(client, monkeypatch):
+    monkeypatch.setattr(order_route, "wait_for_market_quote", lambda *args: None)
+    sent = []
+    monkeypatch.setattr(
+        order_route.mt5,
+        "order_send",
+        lambda payload: sent.append(payload),
+        raising=False,
+    )
+    result = client.post(
+        "/order", json={"symbol": "EURUSD", "volume": 0.1, "type": "BUY"}
+    )
+    assert result.status_code == 503
+    assert result.json["submitted"] is False
+    assert result.json["error_type"] == "connection_error"
+    assert not sent
+
+
+def test_same_key_can_retry_after_quote_failure_before_submission(client, monkeypatch):
+    quote = [None, SimpleNamespace(bid=1.09, ask=1.10)]
+    monkeypatch.setattr(
+        order_route, "wait_for_market_quote", lambda *args: quote.pop(0)
+    )
+    sent = []
+    monkeypatch.setattr(
+        order_route.mt5,
+        "order_send",
+        lambda payload: (
+            sent.append(payload) or OrderResult(10009, "done", 0.1, 1.10, 10, 11, 0, 0)
+        ),
+        raising=False,
+    )
+    payload = {"symbol": "EURUSD", "volume": 0.1, "type": "BUY"}
+    headers = {"Idempotency-Key": "quote-ready-later"}
+    assert client.post("/order", json=payload, headers=headers).status_code == 503
+    assert client.post("/order", json=payload, headers=headers).status_code == 200
+    assert len(sent) == 1
+
+
 def test_same_key_with_different_http_request_returns_conflict(client, monkeypatch):
     calls = []
     monkeypatch.setattr(
